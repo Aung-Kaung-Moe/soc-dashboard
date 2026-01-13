@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Severity {
+  Critical
+  Medium
+  Low
+}
+
+enum AlertStatus {
+  Open
+  Investigating
+  Closed
+}
+
+enum UserRole {
+  L1
+  L2
+  Admin
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(L1)
+
+  assignedAlerts Alert[]    @relation("AlertAssignedTo")
+  auditActions   AuditLog[] @relation("AuditActor")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Alert {
+  id            String      @id @default(cuid())
+  timestamp     DateTime    @default(now())
+
+  sourceIp      String
+  destinationIp String?
+
+  alertType     String
+  severity      Severity
+  status        AlertStatus @default(Open)
+
+  title         String
+  description   String?
+
+  ruleName      String?
+  source        String?     // WAF / EDR / Firewall
+  hostname      String?
+  user          String?     // username involved (not FK - often external)
+
+  // SQLite does NOT support String[] primitive lists
+  // Store tags as JSON array: ["bruteforce","ssh","geo:RU"]
+  tags          Json?
+
+  assignedToId  String?
+  assignedTo    User?       @relation("AlertAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  eventCount    Int         @default(1)
+  correlationId String?
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([timestamp])
+  @@index([severity])
+  @@index([status])
+  @@index([sourceIp])
+  @@index([assignedToId])
+  @@index([correlationId])
+}
+
+model LogEntry {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  level     LogLevel
+  message   String
+  source    String?
+  host      String?
+  raw       Json?
+
+  @@index([timestamp])
+  @@index([level])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  actor       User     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  action      String
+  entityType  String
+  entityId    String
+
+  before      Json?
+  after       Json?
+
+  timestamp   DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+}

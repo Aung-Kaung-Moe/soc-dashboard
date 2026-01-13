@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: soc_db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: soc
+      POSTGRES_PASSWORD: socpass
+      POSTGRES_DB: soc_dashboard
+    volumes:
+      - soc_db_data:/var/lib/postgresql/data
+
+volumes:
+  soc_db_data:
