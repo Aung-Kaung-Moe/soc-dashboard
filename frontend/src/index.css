@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Modern Obsidian */
+:root {
+  color-scheme: dark;
+}
