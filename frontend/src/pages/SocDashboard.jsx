@@ -1,196 +1,189 @@
-import React, { useMemo, useState } from "react";
-import Sidebar from "../components/Sidebar.jsx";
-import Topbar from "../components/Topbar.jsx";
-import MetricCard from "../components/MetricCard.jsx";
-import ChartPanel from "../components/ChartPanel.jsx";
-import AlertTable from "../components/AlertTable.jsx";
-import LogViewer from "../components/LogViewer.jsx";
-
-import { Shield, Flame } from "lucide-react";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from "recharts";
-
-import {
-  ANALYST,
-  ALERTS_OVER_TIME,
-  SEVERITY_DISTRIBUTION,
-  ATTACK_TYPES,
-  ALERTS,
-  LOG_LINES,
-} from "../data/mockData.js";
-import { PIE_COLORS } from "../lib/ui.js";
-
-const tooltipStyle = {
-  background: "rgba(2, 6, 23, 0.95)", // slate-950-ish
-  border: "1px solid rgba(148, 163, 184, 0.18)", // slate-400-ish
-  borderRadius: 12,
-  color: "white",
-};
+import React, { useEffect, useMemo, useState } from "react";
+import Sidebar from "../components/Sidebar";
+import Topbar from "../components/Topbar";
+import MetricCard from "../components/MetricCard";
+import ChartPanel from "../components/ChartPanel";
+import AlertTable from "../components/AlertTable";
+import LogViewer from "../components/LogViewer";
+import { api } from "../lib/api";
 
 export default function SocDashboard() {
-  const [activePage, setActivePage] = useState("dashboard");
+  const [alerts, setAlerts] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [loadingAlerts, setLoadingAlerts] = useState(true);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+  const [error, setError] = useState("");
 
-  const metrics = useMemo(() => {
-    const total = ALERTS.length;
-    const critical = ALERTS.filter((a) => a.severity === "Critical").length;
-    const medium = ALERTS.filter((a) => a.severity === "Medium").length;
-    const low = ALERTS.filter((a) => a.severity === "Low").length;
-    return { total, critical, medium, low };
+  // Table controls
+  const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("All"); // All | Critical | Medium | Low
+
+  // Fetch alerts (with server-side filters)
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoadingAlerts(true);
+      setError("");
+
+      try {
+        const params = {};
+        if (search.trim()) params.search = search.trim();
+        if (severityFilter !== "All") params.severity = severityFilter;
+
+        const data = await api.getAlerts(params);
+        if (!alive) return;
+        setAlerts(data.items ?? []);
+      } catch (e) {
+        if (!alive) return;
+        setError(e.message || "Failed to load alerts");
+      } finally {
+        if (alive) setLoadingAlerts(false);
+      }
+    }
+
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [search, severityFilter]);
+
+  // Fetch logs (polling)
+  useEffect(() => {
+    let alive = true;
+    let timer;
+
+    async function loadLogs() {
+      try {
+        setLoadingLogs(true);
+        const data = await api.getLatestLogs(200);
+        if (!alive) return;
+        // if your endpoint returns {items:[...]} then use data.items
+        setLogs(data.items ?? data ?? []);
+      } catch (e) {
+        if (!alive) return;
+        setError((prev) => prev || (e.message || "Failed to load logs"));
+      } finally {
+        if (alive) setLoadingLogs(false);
+      }
+    }
+
+    loadLogs();
+    timer = setInterval(loadLogs, 5000); // refresh logs every 5s
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
   }, []);
 
+  // Metrics
+  const metrics = useMemo(() => {
+    const total = alerts.length;
+    const critical = alerts.filter((a) => a.severity === "Critical").length;
+    const medium = alerts.filter((a) => a.severity === "Medium").length;
+    const low = alerts.filter((a) => a.severity === "Low").length;
+
+    return { total, critical, medium, low };
+  }, [alerts]);
+
+  // Charts data (shape these to what your ChartPanel expects)
+  const severityDistribution = useMemo(() => {
+    return [
+      { name: "Critical", value: metrics.critical },
+      { name: "Medium", value: metrics.medium },
+      { name: "Low", value: metrics.low },
+    ];
+  }, [metrics]);
+
+  const attackTypePie = useMemo(() => {
+    const map = new Map();
+    for (const a of alerts) {
+      const key = a.alertType || "Unknown";
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+  }, [alerts]);
+
+  const alertsOverTime = useMemo(() => {
+    // Group by hour (last 12h)
+    const buckets = new Map();
+    const now = Date.now();
+    for (let i = 11; i >= 0; i--) {
+      const t = new Date(now - i * 60 * 60 * 1000);
+      const key = `${t.getHours().toString().padStart(2, "0")}:00`;
+      buckets.set(key, 0);
+    }
+
+    for (const a of alerts) {
+      const t = new Date(a.timestamp);
+      const key = `${t.getHours().toString().padStart(2, "0")}:00`;
+      if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1);
+    }
+
+    return Array.from(buckets.entries()).map(([time, count]) => ({
+      time,
+      alerts: count,
+    }));
+  }, [alerts]);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="flex min-h-screen">
-        <Sidebar active={activePage} onNavigate={setActivePage} />
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex">
+      <Sidebar />
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar analyst={ANALYST} />
+      <div className="flex-1 flex flex-col">
+        <Topbar />
 
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-            <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight text-slate-100">
-                  SOC Analyst Dashboard
-                </h1>
-                <p className="mt-1 text-sm text-slate-400">
-                  Monitor alerts, severity trends, and suspicious activity (mock data)
-                </p>
-              </div>
-
-              <div className="text-xs text-slate-400">
-                Theme: <span className="text-slate-200">Modern Obsidian</span> • Active:{" "}
-                <span className="text-blue-400">Cyber Blue</span>
-              </div>
+        <main className="p-6 space-y-6">
+          {error && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-rose-200">
+              {error}
             </div>
+          )}
 
-            {activePage === "dashboard" ? (
-              <DashboardHome metrics={metrics} />
-            ) : activePage === "alerts" ? (
-              <AlertTable alerts={ALERTS} />
-            ) : activePage === "logs" ? (
-              <LogViewer logs={LOG_LINES} />
-            ) : activePage === "threat" ? (
-              <Placeholder title="Threat Intelligence" text="Add IOC feeds, CVEs, and campaigns here." />
-            ) : (
-              <Placeholder title="Settings" text="Add theme, refresh, routing, and notification preferences." />
-            )}
-          </main>
+          {/* Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <MetricCard title="Total Alerts Today" value={metrics.total} variant="info" />
+            <MetricCard title="Critical Alerts" value={metrics.critical} variant="critical" />
+            <MetricCard title="Medium Alerts" value={metrics.medium} variant="medium" />
+            <MetricCard title="Low Alerts" value={metrics.low} variant="low" />
+          </div>
 
-          <footer className="border-t border-slate-800/60 bg-slate-950 px-4 py-4 text-center text-xs text-slate-400">
-            SOC Dashboard • Tailwind + React + Recharts • Mock JSON
-          </footer>
-        </div>
+          {/* Charts */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <ChartPanel
+              title="Alerts Over Time"
+              type="line"
+              data={alertsOverTime}
+              loading={loadingAlerts}
+            />
+            <ChartPanel
+              title="Severity Distribution"
+              type="bar"
+              data={severityDistribution}
+              loading={loadingAlerts}
+            />
+            <ChartPanel
+              title="Attack Types"
+              type="pie"
+              data={attackTypePie}
+              loading={loadingAlerts}
+            />
+          </div>
+
+          {/* Alerts Table */}
+          <AlertTable
+            alerts={alerts}
+            loading={loadingAlerts}
+            search={search}
+            onSearchChange={setSearch}
+            severityFilter={severityFilter}
+            onSeverityFilterChange={setSeverityFilter}
+          />
+
+          {/* Logs */}
+          <LogViewer logs={logs} loading={loadingLogs} />
+        </main>
       </div>
-    </div>
-  );
-}
-
-function DashboardHome({ metrics }) {
-  return (
-    <div className="space-y-6">
-      <section className="grid gap-4 md:grid-cols-4">
-        <MetricCard
-          title="Total Alerts Today"
-          value={metrics.total}
-          severity="Medium"
-          icon={<Shield className="h-5 w-5 text-blue-400" />}
-        />
-        <MetricCard
-          title="Critical Alerts"
-          value={metrics.critical}
-          severity="Critical"
-          icon={<Flame className="h-5 w-5 text-rose-400" />}
-        />
-        <MetricCard
-          title="Medium Alerts"
-          value={metrics.medium}
-          severity="Medium"
-          icon={<Shield className="h-5 w-5 text-amber-400" />}
-        />
-        <MetricCard
-          title="Low Alerts"
-          value={metrics.low}
-          severity="Low"
-          icon={<Shield className="h-5 w-5 text-emerald-400" />}
-        />
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-3">
-        <ChartPanel title="Alerts Over Time" subtitle="Line chart of alert volume">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={ALERTS_OVER_TIME} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.10)" />
-              <XAxis dataKey="time" stroke="rgba(148,163,184,0.55)" tick={{ fontSize: 12 }} />
-              <YAxis stroke="rgba(148,163,184,0.55)" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Line type="monotone" dataKey="alerts" stroke="#3B82F6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartPanel>
-
-        <ChartPanel title="Severity Distribution" subtitle="Bar chart by severity">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={SEVERITY_DISTRIBUTION} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.10)" />
-              <XAxis dataKey="severity" stroke="rgba(148,163,184,0.55)" tick={{ fontSize: 12 }} />
-              <YAxis stroke="rgba(148,163,184,0.55)" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" radius={[10, 10, 4, 4]}>
-                {SEVERITY_DISTRIBUTION.map((row) => {
-                  const color =
-                    row.severity === "Critical" ? "#F43F5E" : row.severity === "Medium" ? "#F59E0B" : "#10B981";
-                  return <Cell key={row.severity} fill={color} />;
-                })}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartPanel>
-
-        <ChartPanel title="Attack Types" subtitle="Pie chart of top categories">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Tooltip contentStyle={tooltipStyle} />
-              <Legend wrapperStyle={{ color: "rgba(226,232,240,0.75)", fontSize: 12 }} />
-              <Pie data={ATTACK_TYPES} dataKey="value" nameKey="type" innerRadius={45} outerRadius={80} paddingAngle={2}>
-                {ATTACK_TYPES.map((_, idx) => (
-                  <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartPanel>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <AlertTable alerts={ALERTS} />
-        </div>
-        <div className="lg:col-span-1">
-          <LogViewer logs={LOG_LINES} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Placeholder({ title, text }) {
-  return (
-    <div className="rounded-2xl bg-slate-900 p-6 ring-1 ring-slate-800/70 shadow-sm">
-      <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
-      <p className="mt-2 text-sm text-slate-400">{text}</p>
     </div>
   );
 }

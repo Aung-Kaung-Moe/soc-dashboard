@@ -1,22 +1,52 @@
+// frontend/src/components/AlertTable.jsx
 import React, { useMemo, useState } from "react";
 import { cls, SEVERITY_META, STATUS_META } from "../lib/ui.js";
 
-export default function AlertTable({ alerts }) {
+/**
+ * Updated AlertTable for backend data:
+ * - Accepts backend timestamps (ISO) and formats them nicely
+ * - Safe string handling (no `.toLowerCase()` on non-strings)
+ * - Keeps your existing UI + severity/status chips
+ *
+ * Props:
+ *  - alerts: array from backend (items)
+ */
+export default function AlertTable({ alerts = [] }) {
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("All");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return alerts.filter((a) => {
+
+    return (alerts ?? []).filter((a) => {
+      const ts = formatTimestamp(a?.timestamp);
+      const sourceIp = safeStr(a?.sourceIp);
+      const alertType = safeStr(a?.alertType);
+      const severity = safeStr(a?.severity);
+      const status = safeStr(a?.status);
+      const destIp = safeStr(a?.destinationIp);
+      const ruleName = safeStr(a?.ruleName);
+      const hostname = safeStr(a?.hostname);
+      const user = safeStr(a?.user);
+      const correlationId = safeStr(a?.correlationId);
+      const title = safeStr(a?.title);
+
       const matchesText =
         !q ||
-        a.timestamp.toLowerCase().includes(q) ||
-        a.sourceIp.toLowerCase().includes(q) ||
-        a.alertType.toLowerCase().includes(q) ||
-        a.severity.toLowerCase().includes(q) ||
-        a.status.toLowerCase().includes(q);
+        ts.toLowerCase().includes(q) ||
+        sourceIp.toLowerCase().includes(q) ||
+        destIp.toLowerCase().includes(q) ||
+        alertType.toLowerCase().includes(q) ||
+        severity.toLowerCase().includes(q) ||
+        status.toLowerCase().includes(q) ||
+        ruleName.toLowerCase().includes(q) ||
+        hostname.toLowerCase().includes(q) ||
+        user.toLowerCase().includes(q) ||
+        correlationId.toLowerCase().includes(q) ||
+        title.toLowerCase().includes(q);
 
-      const matchesSeverity = severityFilter === "All" ? true : a.severity === severityFilter;
+      const matchesSeverity = severityFilter === "All" ? true : severity === severityFilter;
+
       return matchesText && matchesSeverity;
     });
   }, [alerts, query, severityFilter]);
@@ -66,24 +96,30 @@ export default function AlertTable({ alerts }) {
 
           <tbody className="divide-y divide-slate-800/40">
             {filtered.map((a) => {
-              const sev = SEVERITY_META[a.severity] ?? SEVERITY_META.Low;
-              const statusClass = STATUS_META[a.status] ?? STATUS_META.Open;
+              const severity = safeStr(a?.severity) || "Low";
+              const status = safeStr(a?.status) || "Open";
+
+              const sev = SEVERITY_META[severity] ?? SEVERITY_META.Low;
+              const statusClass = STATUS_META[status] ?? STATUS_META.Open;
 
               return (
                 <tr key={a.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-3 text-slate-400">{a.timestamp}</td>
-                  <td className="px-4 py-3 font-mono text-slate-200">{a.sourceIp}</td>
-                  <td className="px-4 py-3 text-slate-200">{a.alertType}</td>
+                  {/* Backend timestamp is ISO Date -> formatted */}
+                  <td className="px-4 py-3 text-slate-400">{formatTimestamp(a?.timestamp)}</td>
+
+                  <td className="px-4 py-3 font-mono text-slate-200">{safeStr(a?.sourceIp)}</td>
+
+                  <td className="px-4 py-3 text-slate-200">{safeStr(a?.alertType)}</td>
 
                   <td className="px-4 py-3">
                     <span className={cls("inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs", sev.badge)}>
                       <span className={cls("h-1.5 w-1.5 rounded-full", sev.dot)} />
-                      {a.severity}
+                      {severity}
                     </span>
                   </td>
 
                   <td className="px-4 py-3">
-                    <span className={cls("rounded-full px-2.5 py-1 text-xs", statusClass)}>{a.status}</span>
+                    <span className={cls("rounded-full px-2.5 py-1 text-xs", statusClass)}>{status}</span>
                   </td>
                 </tr>
               );
@@ -101,4 +137,26 @@ export default function AlertTable({ alerts }) {
       </div>
     </div>
   );
+}
+
+/** Safely coerce unknown values to string */
+function safeStr(v) {
+  if (v === null || v === undefined) return "";
+  return String(v);
+}
+
+/** Format ISO timestamps from backend into readable table text */
+function formatTimestamp(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+
+  // Example: 2026-01-15 23:07:12
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
