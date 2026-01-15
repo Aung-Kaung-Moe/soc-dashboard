@@ -1,76 +1,84 @@
-// frontend/src/components/AlertTable.jsx
-import React, { useMemo, useState } from "react";
-import { cls, SEVERITY_META, STATUS_META } from "../lib/ui.js";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiGet } from "../api/client.js";
 
-/**
- * Updated AlertTable for backend data:
- * - Accepts backend timestamps (ISO) and formats them nicely
- * - Safe string handling (no `.toLowerCase()` on non-strings)
- * - Keeps your existing UI + severity/status chips
- *
- * Props:
- *  - alerts: array from backend (items)
- */
-export default function AlertTable({ alerts = [] }) {
+const SEV_META = {
+  Critical: { badge: "text-rose-400 bg-rose-500/10 ring-1 ring-rose-500/20", dot: "bg-rose-400" },
+  Medium: { badge: "text-amber-400 bg-amber-500/10 ring-1 ring-amber-500/20", dot: "bg-amber-400" },
+  Low: { badge: "text-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-500/20", dot: "bg-emerald-400" }
+};
+
+const STATUS_META = {
+  Open: "text-slate-200 bg-slate-800/40 ring-1 ring-slate-700/40",
+  Investigating: "text-blue-300 bg-blue-500/10 ring-1 ring-blue-500/20",
+  Closed: "text-slate-400 bg-slate-900/40 ring-1 ring-slate-800/40"
+};
+
+function cls(...a) {
+  return a.filter(Boolean).join(" ");
+}
+
+function fmt(ts) {
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return ts;
+  }
+}
+
+export default function AlertTable() {
   const [query, setQuery] = useState("");
-  const [severityFilter, setSeverityFilter] = useState("All");
+  const [severity, setSeverity] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [loading, setLoading] = useState(false);
+  const [alerts, setAlerts] = useState([]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  async function load() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set("search", query.trim());
+      if (severity !== "All") params.set("severity", severity);
+      if (status !== "All") params.set("status", status);
+      params.set("limit", "50");
 
-    return (alerts ?? []).filter((a) => {
-      const ts = formatTimestamp(a?.timestamp);
-      const sourceIp = safeStr(a?.sourceIp);
-      const alertType = safeStr(a?.alertType);
-      const severity = safeStr(a?.severity);
-      const status = safeStr(a?.status);
-      const destIp = safeStr(a?.destinationIp);
-      const ruleName = safeStr(a?.ruleName);
-      const hostname = safeStr(a?.hostname);
-      const user = safeStr(a?.user);
-      const correlationId = safeStr(a?.correlationId);
-      const title = safeStr(a?.title);
+      const data = await apiGet(`/api/alerts?${params.toString()}`);
+      setAlerts(data.items || []);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      const matchesText =
-        !q ||
-        ts.toLowerCase().includes(q) ||
-        sourceIp.toLowerCase().includes(q) ||
-        destIp.toLowerCase().includes(q) ||
-        alertType.toLowerCase().includes(q) ||
-        severity.toLowerCase().includes(q) ||
-        status.toLowerCase().includes(q) ||
-        ruleName.toLowerCase().includes(q) ||
-        hostname.toLowerCase().includes(q) ||
-        user.toLowerCase().includes(q) ||
-        correlationId.toLowerCase().includes(q) ||
-        title.toLowerCase().includes(q);
+  useEffect(() => {
+    // debounce for beginners
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, severity, status]);
 
-      const matchesSeverity = severityFilter === "All" ? true : severity === severityFilter;
-
-      return matchesText && matchesSeverity;
-    });
-  }, [alerts, query, severityFilter]);
+  const rows = useMemo(() => alerts, [alerts]);
 
   return (
     <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800/70 shadow-sm">
-      {/* Header + controls */}
       <div className="flex flex-col gap-3 border-b border-slate-800/70 p-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-100">Alerts</h3>
-          <p className="mt-1 text-xs text-slate-400">Search and triage incoming detections</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Beginner tip: start with <span className="text-slate-200">Critical</span> +{" "}
+            <span className="text-slate-200">Open</span>.
+          </p>
         </div>
 
         <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search alerts (IP, type, status...)"
+            placeholder="Search (IP, type, hostname, user...)"
             className="w-full rounded-xl bg-slate-950/30 px-3 py-2 text-sm text-slate-100 ring-1 ring-slate-800/70 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 md:w-80"
           />
 
           <select
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value)}
             className="rounded-xl bg-slate-950/30 px-3 py-2 text-sm text-slate-100 ring-1 ring-slate-800/70 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
           >
             <option value="All">All Severities</option>
@@ -78,85 +86,73 @@ export default function AlertTable({ alerts = [] }) {
             <option value="Medium">Medium</option>
             <option value="Low">Low</option>
           </select>
+
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="rounded-xl bg-slate-950/30 px-3 py-2 text-sm text-slate-100 ring-1 ring-slate-800/70 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
+          >
+            <option value="All">All Status</option>
+            <option value="Open">Open</option>
+            <option value="Investigating">Investigating</option>
+            <option value="Closed">Closed</option>
+          </select>
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="text-xs text-slate-400">
             <tr className="border-b border-slate-800/70">
               <th className="px-4 py-3 font-medium">Timestamp</th>
               <th className="px-4 py-3 font-medium">Source IP</th>
-              <th className="px-4 py-3 font-medium">Alert Type</th>
+              <th className="px-4 py-3 font-medium">Title</th>
               <th className="px-4 py-3 font-medium">Severity</th>
               <th className="px-4 py-3 font-medium">Status</th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-800/40">
-            {filtered.map((a) => {
-              const severity = safeStr(a?.severity) || "Low";
-              const status = safeStr(a?.status) || "Open";
-
-              const sev = SEVERITY_META[severity] ?? SEVERITY_META.Low;
-              const statusClass = STATUS_META[status] ?? STATUS_META.Open;
-
-              return (
-                <tr key={a.id} className="hover:bg-slate-800/30">
-                  {/* Backend timestamp is ISO Date -> formatted */}
-                  <td className="px-4 py-3 text-slate-400">{formatTimestamp(a?.timestamp)}</td>
-
-                  <td className="px-4 py-3 font-mono text-slate-200">{safeStr(a?.sourceIp)}</td>
-
-                  <td className="px-4 py-3 text-slate-200">{safeStr(a?.alertType)}</td>
-
-                  <td className="px-4 py-3">
-                    <span className={cls("inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs", sev.badge)}>
-                      <span className={cls("h-1.5 w-1.5 rounded-full", sev.dot)} />
-                      {severity}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <span className={cls("rounded-full px-2.5 py-1 text-xs", statusClass)}>{status}</span>
-                  </td>
-                </tr>
-              );
-            })}
-
-            {filtered.length === 0 ? (
+            {loading ? (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
-                  No alerts match your search/filter.
+                  Loading…
                 </td>
               </tr>
-            ) : null}
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                  No alerts match your filters.
+                </td>
+              </tr>
+            ) : (
+              rows.map((a) => {
+                const sev = SEV_META[a.severity] ?? SEV_META.Low;
+                const statusClass = STATUS_META[a.status] ?? STATUS_META.Open;
+
+                return (
+                  <tr key={a.id} className="hover:bg-slate-800/30">
+                    <td className="px-4 py-3 text-slate-400">{fmt(a.timestamp)}</td>
+                    <td className="px-4 py-3 font-mono text-slate-200">{a.sourceIp}</td>
+                    <td className="px-4 py-3 text-slate-200">{a.title || a.alertType}</td>
+
+                    <td className="px-4 py-3">
+                      <span className={cls("inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs", sev.badge)}>
+                        <span className={cls("h-1.5 w-1.5 rounded-full", sev.dot)} />
+                        {a.severity}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <span className={cls("rounded-full px-2.5 py-1 text-xs", statusClass)}>{a.status}</span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
     </div>
   );
-}
-
-/** Safely coerce unknown values to string */
-function safeStr(v) {
-  if (v === null || v === undefined) return "";
-  return String(v);
-}
-
-/** Format ISO timestamps from backend into readable table text */
-function formatTimestamp(v) {
-  if (!v) return "";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-
-  // Example: 2026-01-15 23:07:12
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }

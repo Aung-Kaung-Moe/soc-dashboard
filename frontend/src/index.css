@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Modern Obsidian */
-:root {
-  color-scheme: dark;
-}
+/* Simple scrollbar for dark UI */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.25); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: rgba(2,6,23,0.6); }
