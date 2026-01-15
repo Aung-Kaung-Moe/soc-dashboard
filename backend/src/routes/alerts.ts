@@ -1,4 +1,3 @@
-// backend/src/routes/alerts.ts
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../prisma";
 import { AlertStatus, Severity, Prisma } from "@prisma/client";
@@ -22,21 +21,10 @@ function isAlertStatus(x: unknown): x is AlertStatus {
   return typeof x === "string" && (Object.values(AlertStatus) as string[]).includes(x);
 }
 
-// Prisma JSON helper (SQLite Json column)
-function toJson(v: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-  return v === undefined ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
-}
-
 /**
  * GET /api/alerts
- * Filters:
- *  - severity=Critical|Medium|Low
- *  - status=Open|Investigating|Closed
- *  - search=ip/title/type/rule/hostname/user/correlationId
- *  - assignedToId=...
- *  - tag=bruteforce (in-memory filter for SQLite)
- *  - from,to (ISO)
- *  - limit, offset
+ * Query:
+ *  - severity, status, search, assignedToId, tag, from, to, limit, offset
  */
 alertsRouter.get("/", async (req: Request, res: Response) => {
   const q = req.query as Record<string, string | undefined>;
@@ -81,7 +69,7 @@ alertsRouter.get("/", async (req: Request, res: Response) => {
     }),
   ]);
 
-  // SQLite: tags filter in-memory
+  // tag filter in-memory (SQLite JSON)
   const filteredItems = q.tag ? items.filter((a) => tagsContain(a.tags as unknown, q.tag!)) : items;
 
   res.json({
@@ -94,11 +82,9 @@ alertsRouter.get("/", async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/alerts/:id/status
- * Body: { status: Open|Investigating|Closed, assignedToId?: string }
- * Writes audit record.
  */
 alertsRouter.patch("/:id/status", async (req: AuthedRequest, res: Response) => {
-  const id = String(req.params.id); // ✅ force string (fixes entityId type error)
+  const id = String(req.params.id);
   const actorUserId = req.actorUserId;
 
   if (!actorUserId) {
@@ -107,7 +93,7 @@ alertsRouter.patch("/:id/status", async (req: AuthedRequest, res: Response) => {
     });
   }
 
-  const body = req.body as { status?: AlertStatus; assignedToId?: string };
+  const body = req.body as { status?: AlertStatus; assignedToId?: string | null };
 
   if (!isAlertStatus(body.status)) {
     return res.status(400).json({ error: "Invalid status." });
@@ -130,7 +116,7 @@ alertsRouter.patch("/:id/status", async (req: AuthedRequest, res: Response) => {
         actorUserId,
         action: "ALERT_STATUS_UPDATED",
         entityType: "Alert",
-        entityId: id, // ✅ now always string
+        entityId: id, // ✅ always string
         before: before as any,
         after: next as any,
       },
@@ -144,11 +130,9 @@ alertsRouter.patch("/:id/status", async (req: AuthedRequest, res: Response) => {
 
 /**
  * PATCH /api/alerts/:id
- * Partial update (title/description/tags/etc.)
- * Writes audit record.
  */
 alertsRouter.patch("/:id", async (req: AuthedRequest, res: Response) => {
-  const id = String(req.params.id); // ✅ force string (fixes entityId type error)
+  const id = String(req.params.id);
   const actorUserId = req.actorUserId;
 
   if (!actorUserId) {
@@ -163,7 +147,7 @@ alertsRouter.patch("/:id", async (req: AuthedRequest, res: Response) => {
   const body = req.body as Partial<{
     title: string;
     description: string | null;
-    tags: unknown; // expects JSON array like ["ssh","bruteforce"]
+    tags: unknown; // JSON array
     assignedToId: string | null;
     eventCount: number;
     correlationId: string | null;
@@ -179,15 +163,15 @@ alertsRouter.patch("/:id", async (req: AuthedRequest, res: Response) => {
     data: {
       ...(body.title !== undefined ? { title: body.title } : {}),
       ...(body.description !== undefined ? { description: body.description } : {}),
-      ...(body.tags !== undefined ? { tags: toJson(body.tags) } : {}),
-      ...(body.assignedToId !== undefined ? { assignedToId: body.assignedToId ?? undefined } : {}),
+      ...(body.tags !== undefined ? { tags: body.tags as any } : {}),
+      ...(body.assignedToId !== undefined ? { assignedToId: body.assignedToId } : {}),
       ...(body.eventCount !== undefined ? { eventCount: body.eventCount } : {}),
-      ...(body.correlationId !== undefined ? { correlationId: body.correlationId ?? undefined } : {}),
-      ...(body.ruleName !== undefined ? { ruleName: body.ruleName ?? undefined } : {}),
-      ...(body.hostname !== undefined ? { hostname: body.hostname ?? undefined } : {}),
-      ...(body.user !== undefined ? { user: body.user ?? undefined } : {}),
-      ...(body.destinationIp !== undefined ? { destinationIp: body.destinationIp ?? undefined } : {}),
-      ...(body.source !== undefined ? { source: body.source ?? undefined } : {}),
+      ...(body.correlationId !== undefined ? { correlationId: body.correlationId } : {}),
+      ...(body.ruleName !== undefined ? { ruleName: body.ruleName } : {}),
+      ...(body.hostname !== undefined ? { hostname: body.hostname } : {}),
+      ...(body.user !== undefined ? { user: body.user } : {}),
+      ...(body.destinationIp !== undefined ? { destinationIp: body.destinationIp } : {}),
+      ...(body.source !== undefined ? { source: body.source } : {}),
     },
   });
 
@@ -196,7 +180,7 @@ alertsRouter.patch("/:id", async (req: AuthedRequest, res: Response) => {
       actorUserId,
       action: "ALERT_UPDATED",
       entityType: "Alert",
-      entityId: id, // ✅ now always string
+      entityId: id, // ✅ always string
       before: before as any,
       after: next as any,
     },

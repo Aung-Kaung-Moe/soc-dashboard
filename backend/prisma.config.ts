@@ -3,14 +3,12 @@ import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
-
-  // ✅ Needed for migrate dev
   datasource: {
-    url: process.env.DATABASE_URL,
+    // Prisma wants DATABASE_URL
+    url: process.env.DATABASE_URL ?? "file:./dev.db",
   },
-
-  // ✅ Prisma v7 seed command
   migrations: {
+    // Your seed command
     seed: "npx tsx prisma/seed.ts",
   },
 });
